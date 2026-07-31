@@ -612,7 +612,7 @@ fn generate_thumbnail(
     };
     source
         .thumbnail(256, 256)
-        .save_with_format(destination, image::ImageFormat::Png)
+        .save_with_format(destination, ImageFormat::Png)
         .map_err(error_text)
 }
 
@@ -959,7 +959,7 @@ fn import_static_pet(
     fs::create_dir(&staging).map_err(error_text)?;
     let result = (|| {
         image
-            .save_with_format(staging.join("character.png"), image::ImageFormat::Png)
+            .save_with_format(staging.join("character.png"), ImageFormat::Png)
             .map_err(error_text)?;
         generate_thumbnail(
             &image,
