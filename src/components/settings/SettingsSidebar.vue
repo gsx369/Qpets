@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { SettingsSection } from '../../settings/types'
+import type { SettingsIconName } from '../../settings/icons'
+import AppIcon from './AppIcon.vue'
 
 defineProps<{
   active: SettingsSection
@@ -9,17 +11,17 @@ const emit = defineEmits<{
   select: [section: SettingsSection]
 }>()
 
-const items: Array<{ id: SettingsSection; icon: string; label: string }> = [
-  { id: 'library', icon: '✦', label: '角色库' },
-  { id: 'pet', icon: '⌁', label: '桌宠与互动' },
-  { id: 'about', icon: 'i', label: '关于' },
+const items: Array<{ id: SettingsSection; icon: SettingsIconName; label: string }> = [
+  { id: 'library', icon: 'library', label: '角色库' },
+  { id: 'pet', icon: 'sliders', label: '桌宠与互动' },
+  { id: 'about', icon: 'info', label: '关于' },
 ]
 </script>
 
 <template>
   <aside class="settings-sidebar">
     <div class="settings-brand">
-      <div class="settings-brand__mark">Q</div>
+      <div class="settings-brand__mark" aria-hidden="true">Q</div>
       <div>
         <strong>Qpets</strong>
         <span>桌面小伙伴</span>
@@ -33,10 +35,12 @@ const items: Array<{ id: SettingsSection; icon: string; label: string }> = [
         type="button"
         class="settings-nav__item"
         :class="{ 'is-active': active === item.id }"
+        :aria-current="active === item.id ? 'page' : undefined"
+        :title="item.label"
         @click="emit('select', item.id)"
       >
-        <span class="settings-nav__icon">{{ item.icon }}</span>
-        {{ item.label }}
+        <span class="settings-nav__icon"><AppIcon :name="item.icon" /></span>
+        <span class="settings-nav__label">{{ item.label }}</span>
       </button>
     </nav>
 

@@ -30,12 +30,18 @@ export interface PetDescriptor {
   id: string
   displayName: string
   description: string
+  metadataCustomized: boolean
   renderType: RenderType
   source: PetSource
   deletable: boolean
   assetPath: string
   thumbnailPath: string
   dialogues: DialogueMap
+}
+
+export interface PetMetadataDraft {
+  displayName: string
+  description: string
 }
 
 export interface AppState {

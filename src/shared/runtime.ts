@@ -5,7 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, reactive, readonly, ref } from 'vue'
 
 import { MOCK_STATE } from './mock-state'
-import type { AppSettings, AppState, PetDescriptor } from './types'
+import type { AppSettings, AppState, PetDescriptor, PetMetadataDraft } from './types'
 
 function cloneMockState(): AppState {
   return JSON.parse(JSON.stringify(MOCK_STATE)) as AppState
@@ -206,13 +206,53 @@ async function deletePet(petId: string) {
   await enqueueMutation(async () => applyIncomingState(await invoke<AppState>('delete_pet', { petId })))
 }
 
+async function updatePetMetadata(petId: string, metadata: PetMetadataDraft): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    const pet = state.pets.find(item => item.id === petId)
+    if (!pet) return false
+    pet.displayName = metadata.displayName
+    pet.description = metadata.description
+    pet.metadataCustomized = true
+    return true
+  }
+  const result = await enqueueMutation(() => invoke<AppState>('update_pet_metadata', {
+    petId,
+    displayName: metadata.displayName,
+    description: metadata.description,
+  }))
+  if (!result) return false
+  applyIncomingState(result)
+  return true
+}
+
+async function resetPetMetadata(petId: string): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    const pet = state.pets.find(item => item.id === petId)
+    const original = MOCK_STATE.pets.find(item => item.id === petId)
+    if (!pet || !original) return false
+    pet.displayName = original.displayName
+    pet.description = original.description
+    pet.metadataCustomized = false
+    return true
+  }
+  const result = await enqueueMutation(() => invoke<AppState>('reset_pet_metadata', { petId }))
+  if (!result) return false
+  applyIncomingState(result)
+  return true
+}
+
 async function openSettings() {
   if (isTauriRuntime()) await invoke('open_settings')
 }
 
 async function visitHomepage(url: string) {
-  if (isTauriRuntime()) await openUrl(url)
-  else window.open(url, '_blank', 'noopener,noreferrer')
+  error.value = undefined
+  try {
+    if (isTauriRuntime()) await openUrl(url)
+    else window.open(url, '_blank', 'noopener,noreferrer')
+  } catch (cause) {
+    error.value = `无法打开项目主页：${messageFrom(cause)}`
+  }
 }
 
 export function dismissError() {
@@ -244,6 +284,8 @@ export function useAppRuntime() {
     addStaticPet,
     importPetPackage,
     deletePet,
+    updatePetMetadata,
+    resetPetMetadata,
     openSettings,
     visitHomepage,
     dismissError,

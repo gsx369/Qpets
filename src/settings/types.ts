@@ -7,8 +7,14 @@ export interface PetCharacter {
   cover?: string
   builtIn: boolean
   active?: boolean
-  description?: string
+  description: string
+  metadataCustomized: boolean
   modelType?: '动态' | '静态'
+}
+
+export interface CharacterMetadataDraft {
+  displayName: string
+  description: string
 }
 
 export interface PetInteractionSettings {

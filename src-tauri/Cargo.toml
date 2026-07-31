@@ -1,6 +1,6 @@
 [package]
 name = "qpets"
-version = "0.1.1"
+version = "0.1.2"
 description = "A quiet, replaceable desktop pet for Windows"
 authors = ["gsx369"]
 edition = "2021"

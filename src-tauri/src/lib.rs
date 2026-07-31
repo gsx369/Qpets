@@ -102,6 +102,7 @@ pub struct PetDescriptor {
     pub id: String,
     pub display_name: String,
     pub description: String,
+    pub metadata_customized: bool,
     pub render_type: RenderType,
     pub source: PetSource,
     pub deletable: bool,
@@ -128,6 +129,8 @@ struct PersistedState {
     selected_pet_id: String,
     #[serde(default)]
     user_pets: Vec<UserPetRecord>,
+    #[serde(default)]
+    pet_metadata_overrides: HashMap<String, PetMetadataOverride>,
 }
 
 impl Default for PersistedState {
@@ -137,6 +140,7 @@ impl Default for PersistedState {
             settings: Settings::default(),
             selected_pet_id: default_pet_id(),
             user_pets: Vec::new(),
+            pet_metadata_overrides: HashMap::new(),
         }
     }
 }
@@ -146,6 +150,13 @@ impl Default for PersistedState {
 struct UserPetRecord {
     id: String,
     installed_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PetMetadataOverride {
+    display_name: String,
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,6 +240,16 @@ impl Store {
                 .is_ok_and(|descriptor| descriptor.id == record.id)
         });
 
+        let valid_pet_ids: HashSet<String> = builtins
+            .iter()
+            .map(|pet| pet.id.clone())
+            .chain(persisted.user_pets.iter().map(|pet| pet.id.clone()))
+            .collect();
+        persisted.pet_metadata_overrides.retain(|id, metadata| {
+            valid_pet_ids.contains(id)
+                && validate_pet_metadata(&metadata.display_name, &metadata.description).is_ok()
+        });
+
         let selected_exists = builtins
             .iter()
             .any(|pet| pet.id == persisted.selected_pet_id)
@@ -277,6 +298,26 @@ impl Store {
             || self.persisted.user_pets.iter().any(|pet| pet.id == id)
     }
 
+    fn base_pet(&self, id: &str) -> Option<PetDescriptor> {
+        self.builtins
+            .iter()
+            .find(|pet| pet.id == id)
+            .cloned()
+            .or_else(|| {
+                self.persisted
+                    .user_pets
+                    .iter()
+                    .find(|record| record.id == id)
+                    .and_then(|record| {
+                        self.package_dir(&record.id).ok().and_then(|directory| {
+                            descriptor_from_package(&directory, PetSource::User, false, false)
+                                .ok()
+                                .filter(|descriptor| descriptor.id == record.id)
+                        })
+                    })
+            })
+    }
+
     fn app_state(&self) -> AppState {
         let mut pets = self.builtins.clone();
         pets.extend(self.persisted.user_pets.iter().filter_map(|record| {
@@ -286,6 +327,10 @@ impl Store {
                     .filter(|descriptor| descriptor.id == record.id)
             })
         }));
+        for pet in &mut pets {
+            let metadata = self.persisted.pet_metadata_overrides.get(&pet.id);
+            apply_metadata_override(pet, metadata);
+        }
         AppState {
             settings: self.persisted.settings.clone(),
             selected_pet_id: self.persisted.selected_pet_id.clone(),
@@ -417,6 +462,53 @@ fn is_valid_pet_id(value: &str, allow_builtin_namespace: bool) -> bool {
         })
 }
 
+fn validate_pet_metadata(display_name: &str, description: &str) -> CommandResult<()> {
+    if display_name.trim().is_empty() || display_name.chars().count() > 64 {
+        return Err("角色名称不能为空且不能超过 64 个字符".into());
+    }
+    if display_name.chars().any(char::is_control) {
+        return Err("角色名称不能包含换行或控制字符".into());
+    }
+    if description.chars().count() > 280 {
+        return Err("角色描述不能超过 280 个字符".into());
+    }
+    if description
+        .chars()
+        .any(|character| character.is_control() && character != '\n')
+    {
+        return Err("角色描述包含不支持的控制字符".into());
+    }
+    Ok(())
+}
+
+fn normalize_pet_metadata(
+    display_name: &str,
+    description: &str,
+) -> CommandResult<PetMetadataOverride> {
+    let display_name = display_name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let description = description
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim()
+        .to_owned();
+    validate_pet_metadata(&display_name, &description)?;
+    Ok(PetMetadataOverride {
+        display_name,
+        description,
+    })
+}
+
+fn apply_metadata_override(pet: &mut PetDescriptor, metadata: Option<&PetMetadataOverride>) {
+    pet.metadata_customized = metadata.is_some();
+    if let Some(metadata) = metadata {
+        pet.display_name.clone_from(&metadata.display_name);
+        pet.description.clone_from(&metadata.description);
+    }
+}
+
 fn validate_manifest(manifest: &PetManifest, source: PetSource) -> CommandResult<()> {
     if manifest.schema_version != 1 {
         return Err("角色包 schemaVersion 必须为 1".into());
@@ -424,6 +516,9 @@ fn validate_manifest(manifest: &PetManifest, source: PetSource) -> CommandResult
     if !is_valid_pet_id(&manifest.id, source == PetSource::Builtin) {
         return Err("角色 ID 格式无效或使用了保留命名空间".into());
     }
+    // Keep the v1 package contract backward compatible. Local metadata edits
+    // use the stricter `validate_pet_metadata` rules, while already-installed
+    // v1 packages may legitimately contain CRLF or tabs in their description.
     if manifest.display_name.trim().is_empty() || manifest.display_name.chars().count() > 64 {
         return Err("角色名称不能为空且不能超过 64 个字符".into());
     }
@@ -661,6 +756,7 @@ fn descriptor_from_package(
         id: manifest.id,
         display_name: manifest.display_name,
         description: manifest.description,
+        metadata_customized: false,
         render_type: manifest.render_type,
         source,
         deletable: source == PetSource::User,
@@ -941,6 +1037,87 @@ fn select_pet(
 }
 
 #[tauri::command]
+fn update_pet_metadata(
+    pet_id: String,
+    display_name: String,
+    description: String,
+    app: AppHandle,
+    store: State<'_, Mutex<Store>>,
+) -> CommandResult<AppState> {
+    let metadata = normalize_pet_metadata(&display_name, &description)?;
+    let mut store = store.lock().map_err(error_text)?;
+    let base = store
+        .base_pet(&pet_id)
+        .ok_or_else(|| "角色不存在或已损坏".to_string())?;
+    let desired =
+        if metadata.display_name == base.display_name && metadata.description == base.description {
+            None
+        } else {
+            Some(metadata)
+        };
+    let previous = store.persisted.pet_metadata_overrides.get(&pet_id).cloned();
+    if previous == desired {
+        return Ok(store.app_state());
+    }
+
+    match desired {
+        Some(metadata) => {
+            store
+                .persisted
+                .pet_metadata_overrides
+                .insert(pet_id.clone(), metadata);
+        }
+        None => {
+            store.persisted.pet_metadata_overrides.remove(&pet_id);
+        }
+    }
+    if let Err(error) = store.save() {
+        match previous {
+            Some(metadata) => {
+                store
+                    .persisted
+                    .pet_metadata_overrides
+                    .insert(pet_id, metadata);
+            }
+            None => {
+                store.persisted.pet_metadata_overrides.remove(&pet_id);
+            }
+        }
+        return Err(error);
+    }
+    let state = store.app_state();
+    drop(store);
+    broadcast_state(&app, &state);
+    Ok(state)
+}
+
+#[tauri::command]
+fn reset_pet_metadata(
+    pet_id: String,
+    app: AppHandle,
+    store: State<'_, Mutex<Store>>,
+) -> CommandResult<AppState> {
+    let mut store = store.lock().map_err(error_text)?;
+    if !store.has_pet(&pet_id) {
+        return Err("角色不存在或已损坏".into());
+    }
+    let Some(previous) = store.persisted.pet_metadata_overrides.remove(&pet_id) else {
+        return Ok(store.app_state());
+    };
+    if let Err(error) = store.save() {
+        store
+            .persisted
+            .pet_metadata_overrides
+            .insert(pet_id, previous);
+        return Err(error);
+    }
+    let state = store.app_state();
+    drop(store);
+    broadcast_state(&app, &state);
+    Ok(state)
+}
+
+#[tauri::command]
 fn import_static_pet(
     source_path: String,
     name: Option<String>,
@@ -1088,16 +1265,28 @@ fn delete_pet(
         .join(format!("{}-{}", pet_id, operation_id()));
     fs::rename(&source, &trash).map_err(error_text)?;
 
-    let removed = store.persisted.user_pets.remove(index);
-    let previous_selected = store.persisted.selected_pet_id.clone();
-    if previous_selected == pet_id {
+    let previous_persisted = store.persisted.clone();
+    store.persisted.user_pets.remove(index);
+    store.persisted.pet_metadata_overrides.remove(&pet_id);
+    if store.persisted.selected_pet_id == pet_id {
         store.persisted.selected_pet_id = DEFAULT_PET_ID.into();
     }
+    let deleted_persisted = store.persisted.clone();
     if let Err(error) = store.save() {
-        store.persisted.user_pets.insert(index, removed);
-        store.persisted.selected_pet_id = previous_selected;
-        let _ = fs::rename(&trash, &source);
-        return Err(error);
+        store.persisted = previous_persisted;
+        return match fs::rename(&trash, &source) {
+            Ok(()) => Err(error),
+            Err(rollback_error) => {
+                // The package is no longer in its live directory, so keep the
+                // in-memory state aligned with the filesystem. Startup will
+                // make the same repair if the old state file remains on disk.
+                store.persisted = deleted_persisted;
+                let state = store.app_state();
+                drop(store);
+                broadcast_state(&app, &state);
+                Err(format!("{error}；角色目录回滚失败：{rollback_error}"))
+            }
+        };
     }
     if let Err(error) = fs::remove_dir_all(&trash) {
         eprintln!("failed to clean pet trash {}: {error}", trash.display());
@@ -1259,6 +1448,8 @@ pub fn run() {
             get_app_state,
             update_settings,
             select_pet,
+            update_pet_metadata,
+            reset_pet_metadata,
             import_static_pet,
             import_pet_package,
             delete_pet,
@@ -1298,6 +1489,50 @@ mod tests {
             ..Settings::default()
         };
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn pet_metadata_is_normalized_and_unicode_safe() {
+        let metadata = normalize_pet_metadata("  晴   檐  ", "  第一行\r\n第二行  ").unwrap();
+        assert_eq!(metadata.display_name, "晴 檐");
+        assert_eq!(metadata.description, "第一行\n第二行");
+        assert!(normalize_pet_metadata(&"🌸".repeat(64), "").is_ok());
+        assert!(normalize_pet_metadata(&"名".repeat(65), "").is_err());
+        assert!(normalize_pet_metadata("晴檐", &"介".repeat(281)).is_err());
+        assert!(normalize_pet_metadata("晴\n檐", "").is_ok());
+    }
+
+    #[test]
+    fn legacy_state_defaults_to_no_metadata_overrides() {
+        let state: PersistedState = serde_json::from_str(r#"{"librarySchemaVersion":1}"#).unwrap();
+        assert!(state.pet_metadata_overrides.is_empty());
+    }
+
+    #[test]
+    fn metadata_override_changes_only_display_fields() {
+        let mut pet = PetDescriptor {
+            id: "qpet-test".into(),
+            display_name: "默认名称".into(),
+            description: "默认介绍".into(),
+            metadata_customized: false,
+            render_type: RenderType::StaticImageV1,
+            source: PetSource::Builtin,
+            deletable: false,
+            asset_path: "character.png".into(),
+            thumbnail_path: "thumbnail.png".into(),
+            dialogues: HashMap::new(),
+        };
+        let metadata = PetMetadataOverride {
+            display_name: "我的角色".into(),
+            description: "新的介绍".into(),
+        };
+
+        apply_metadata_override(&mut pet, Some(&metadata));
+        assert_eq!(pet.display_name, "我的角色");
+        assert_eq!(pet.description, "新的介绍");
+        assert!(pet.metadata_customized);
+        assert_eq!(pet.id, "qpet-test");
+        assert_eq!(pet.render_type, RenderType::StaticImageV1);
     }
 
     #[test]
