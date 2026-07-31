@@ -45,9 +45,6 @@ function change<K extends keyof PetInteractionSettings>(settings: PetInteraction
     <SettingsRow title="显示对话气泡" description="点击桌宠时显示简短的互动反馈。">
       <input class="settings-switch" type="checkbox" :checked="settings.showBubble" @change="change(settings, 'showBubble', ($event.target as HTMLInputElement).checked)" />
     </SettingsRow>
-    <SettingsRow title="声音音量" :description="`${Math.round(settings.volume * 100)}%`">
-      <input class="settings-range" type="range" min="0" max="1" step="0.05" :value="settings.volume" @input="change(settings, 'volume', Number(($event.target as HTMLInputElement).value))" />
-    </SettingsRow>
     <SettingsRow title="桌宠大小" :description="`${Math.round(settings.scale * 100)}%`">
       <input class="settings-range" type="range" min="0.6" max="1.6" step="0.05" :value="settings.scale" @input="change(settings, 'scale', Number(($event.target as HTMLInputElement).value))" />
     </SettingsRow>

@@ -14,7 +14,7 @@
 
 .pet-stage {
   position: absolute;
-  inset: 48px 0 0;
+  inset: 18.75% 0 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -28,10 +28,6 @@
 
 .atlas-pet {
   display: block;
-  width: auto;
-  height: min(100%, 208px);
-  max-width: 100%;
-  object-fit: contain;
   pointer-events: none;
 }
 

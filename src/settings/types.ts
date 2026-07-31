@@ -17,7 +17,6 @@ export interface PetInteractionSettings {
   followCursor: boolean
   showBubble: boolean
   startWithWindows: boolean
-  volume: number
   scale: number
   idleIntervalSeconds: number
 }

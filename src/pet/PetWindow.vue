@@ -213,6 +213,16 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
-    <button v-if="runtime.error.value" type="button" class="pet-error" title="打开设置查看" @click.stop="runtime.openSettings">!</button>
+    <button
+      v-if="assetLoadFailed"
+      type="button"
+      class="pet-error"
+      title="角色资源无法加载，打开设置查看"
+      @pointerdown.stop
+      @pointerup.stop
+      @click.stop="runtime.openSettings"
+    >
+      !
+    </button>
   </main>
 </template>

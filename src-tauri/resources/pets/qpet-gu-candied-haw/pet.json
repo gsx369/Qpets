@@ -2,9 +2,10 @@
   "schemaVersion": 1,
   "id": "qpet-gu-candied-haw",
   "displayName": "糖葫芦",
-  "description": "橙金汉服风格的静态桌面伙伴。",
-  "renderType": "static-image-v1",
-  "characterPath": "character.png",
+  "description": "手持糖葫芦、温柔安静又偶尔机灵的橙金汉服桌面伙伴。",
+  "renderType": "sprite-atlas-v2",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
   "thumbnailPath": "thumbnail.png",
   "dialoguesPath": "dialogues.json"
 }

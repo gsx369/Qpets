@@ -3,5 +3,8 @@
   "identifier": "pet-window",
   "description": "The transparent pet window only uses the explicit Rust command surface.",
   "windows": ["pet"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
 }

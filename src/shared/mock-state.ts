@@ -31,7 +31,7 @@ export const MOCK_STATE: AppState = {
       id: 'qpet-gu-candied-haw',
       displayName: '糖葫芦',
       description: '带着糖葫芦的橙金汉服伙伴。',
-      renderType: 'static-image-v1',
+      renderType: 'sprite-atlas-v2',
       source: 'builtin',
       deletable: false,
       assetPath: '',

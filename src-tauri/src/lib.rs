@@ -852,8 +852,23 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> CommandResult<()> {
     if enabled {
         manager.enable().map_err(error_text)
     } else {
-        manager.disable().map_err(error_text)
+        match manager.disable() {
+            Ok(()) => Ok(()),
+            // Windows reports ERROR_FILE_NOT_FOUND when either the Run key or
+            // this app's value was already removed. Disabling is idempotent,
+            // so only that exact OS condition is safe to normalize.
+            Err(error) if is_missing_autostart_entry(&error) => Ok(()),
+            Err(error) => Err(error_text(error)),
+        }
     }
+}
+
+fn is_missing_autostart_entry(error: &impl std::fmt::Display) -> bool {
+    error.to_string().contains("(os error 2)")
+}
+
+fn autostart_changed(previous: &Settings, next: &Settings) -> bool {
+    previous.start_with_windows != next.start_with_windows
 }
 
 #[tauri::command]
@@ -870,17 +885,31 @@ fn update_settings(
     settings.validate()?;
     let mut store = store.lock().map_err(error_text)?;
     let previous = store.persisted.settings.clone();
+    let should_sync_autostart = autostart_changed(&previous, &settings);
 
-    apply_autostart(&app, settings.start_with_windows)?;
+    // Other preference edits must not touch the Windows Run key. Besides
+    // needless registry I/O this used to make an ordinary setting save fail
+    // when the disabled autostart value had already been removed externally.
+    if should_sync_autostart {
+        apply_autostart(&app, settings.start_with_windows)?;
+    }
     if let Err(error) = apply_window_settings(&app, &settings) {
-        let _ = apply_autostart(&app, previous.start_with_windows);
+        // `apply_window_settings` performs several native calls. If a later
+        // call fails, replay the previous values so the live window does not
+        // drift away from the persisted state.
+        let _ = apply_window_settings(&app, &previous);
+        if should_sync_autostart {
+            let _ = apply_autostart(&app, previous.start_with_windows);
+        }
         return Err(error);
     }
 
     store.persisted.settings = settings;
     if let Err(error) = store.save() {
         store.persisted.settings = previous.clone();
-        let _ = apply_autostart(&app, previous.start_with_windows);
+        if should_sync_autostart {
+            let _ = apply_autostart(&app, previous.start_with_windows);
+        }
         let _ = apply_window_settings(&app, &previous);
         return Err(error);
     }
@@ -1187,10 +1216,14 @@ pub fn run() {
             let store = Store::open(root, resource_pets).map_err(io::Error::other)?;
             apply_window_settings(app.handle(), &store.persisted.settings)
                 .map_err(io::Error::other)?;
-            if let Err(error) =
-                apply_autostart(app.handle(), store.persisted.settings.start_with_windows)
-            {
-                eprintln!("failed to synchronize autostart: {error}");
+            // A persisted `false` needs no startup cleanup: user-driven
+            // true -> false transitions are already handled idempotently by
+            // `apply_autostart`, and skipping it avoids a Windows missing
+            // Run-key error during normal launches.
+            if store.persisted.settings.start_with_windows {
+                if let Err(error) = apply_autostart(app.handle(), true) {
+                    eprintln!("failed to synchronize autostart: {error}");
+                }
             }
             app.manage(Mutex::new(store));
 
@@ -1265,5 +1298,35 @@ mod tests {
             ..Settings::default()
         };
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn autostart_only_syncs_when_its_setting_changes() {
+        let previous = Settings::default();
+        let unrelated_change = Settings {
+            volume: 0.25,
+            ..previous.clone()
+        };
+        let enabled = Settings {
+            start_with_windows: true,
+            ..previous.clone()
+        };
+
+        assert!(!autostart_changed(&previous, &unrelated_change));
+        assert!(autostart_changed(&previous, &enabled));
+        assert!(autostart_changed(&enabled, &previous));
+    }
+
+    #[test]
+    fn missing_autostart_entry_is_idempotent() {
+        assert!(is_missing_autostart_entry(
+            &"The system cannot find the file specified. (os error 2)"
+        ));
+        assert!(!is_missing_autostart_entry(
+            &"Access is denied. (os error 5)"
+        ));
+        assert!(!is_missing_autostart_entry(
+            &"The system cannot find the device specified. (os error 20)"
+        ));
     }
 }

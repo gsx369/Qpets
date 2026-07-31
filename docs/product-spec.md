@@ -1,4 +1,4 @@
-# Qpets 0.1.0 产品规格
+# Qpets 0.1.1 产品规格
 
 ## 产品边界
 
@@ -10,7 +10,7 @@ Qpets 是单机、Windows 优先的桌面宠物。首版不包含账号、云同
 | --- | --- | --- | --- | --- |
 | `qpet-z1-sunny-brim` | 晴檐 | `sprite-atlas-v2` | 内置、默认 | 否 |
 | `qpet-z2-violet-whisper` | 堇语 | `sprite-atlas-v2` | 内置 | 否 |
-| `qpet-gu-candied-haw` | 糖葫芦 | `static-image-v1` | 内置 | 否 |
+| `qpet-gu-candied-haw` | 糖葫芦 | `sprite-atlas-v2` | 内置 | 否 |
 | `user.*` | 用户角色 | 任一受支持渲染器 | 用户导入 | 是 |
 
 ## 互动

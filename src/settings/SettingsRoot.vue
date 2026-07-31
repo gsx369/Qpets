@@ -22,8 +22,10 @@ function selectCharacter(character: PetCharacter) {
   void runtime.selectPet(character.id)
 }
 
-function updateInteractionSettings(settings: AppSettings) {
-  void runtime.updateSettings(settings)
+function updateInteractionSettings(settings: Omit<AppSettings, 'volume'>) {
+  // `volume` remains in the backend transport schema for persisted-state
+  // compatibility, but Qpets currently has no audio output to control.
+  void runtime.updateSettings({ ...runtime.state.settings, ...settings })
 }
 
 onMounted(() => void runtime.initialize())
@@ -41,7 +43,7 @@ onBeforeUnmount(() => runtime.dispose())
       :interaction-settings="runtime.state.settings"
       :about="{
         appName: 'Qpets',
-        version: '0.1.0',
+        version: '0.1.1',
         description: '晴檐、堇语与糖葫芦陪伴你的轻量桌面宠物。',
         homepage: 'https://github.com/gsx369/Qpets',
       }"

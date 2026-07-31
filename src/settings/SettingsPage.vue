@@ -18,10 +18,10 @@ const props = withDefaults(defineProps<{
   characters: () => [
     { id: 'qpet-z1-sunny-brim', name: '晴檐', builtIn: true, active: true, description: '戴草帽的温柔桌面伙伴', modelType: '动态' },
     { id: 'qpet-z2-violet-whisper', name: '堇语', builtIn: true, description: '藏着一枝小花的安静伙伴', modelType: '动态' },
-    { id: 'qpet-gu-candied-haw', name: '糖葫芦', builtIn: true, description: '橙金汉服风格的桌面伙伴', modelType: '静态' },
+    { id: 'qpet-gu-candied-haw', name: '糖葫芦', builtIn: true, description: '手持糖葫芦的橙金汉服桌面伙伴', modelType: '动态' },
   ],
-  interactionSettings: () => ({ alwaysOnTop: true, clickThrough: false, followCursor: true, showBubble: true, startWithWindows: false, volume: 0.55, scale: 1, idleIntervalSeconds: 30 }),
-  about: () => ({ appName: 'Qpets', version: '0.1.0', description: '让每一次打开电脑，都有一位小伙伴在身边。' }),
+  interactionSettings: () => ({ alwaysOnTop: true, clickThrough: false, followCursor: true, showBubble: true, startWithWindows: false, scale: 1, idleIntervalSeconds: 30 }),
+  about: () => ({ appName: 'Qpets', version: '0.1.1', description: '让每一次打开电脑，都有一位小伙伴在身边。' }),
   initialSection: 'library',
 })
 

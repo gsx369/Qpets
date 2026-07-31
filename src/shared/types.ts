@@ -18,6 +18,7 @@ export interface AppSettings {
   followCursor: boolean
   showBubble: boolean
   startWithWindows: boolean
+  /** Retained for persisted/backend schema compatibility; no frontend control exists until audio playback is added. */
   volume: number
   scale: number
   idleIntervalSeconds: number
