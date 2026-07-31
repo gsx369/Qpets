@@ -1,10 +1,17 @@
 # QPets 运行时角色包 v1
 
-每个内置或导入后的运行时角色包只包含 `pet.json`、`dialogues.json`、`thumbnail.png`，以及一种主资源：v2 动画包为 `spritesheet.webp`，静态包为 `character.png`。制作源图、联系表、预览 GIF、验证报告和照片不进入运行时包。
+每个运行时角色包的根目录只能包含固定文件集合，禁止子目录、符号链接、源图、联系表、预览 GIF、验证报告和照片：
+
+- `sprite-atlas-v2`：`pet.json`、`dialogues.json`、`thumbnail.png`、`spritesheet.webp`
+- `static-image-v1`：`pet.json`、`dialogues.json`、`thumbnail.png`、`character.png`
+
+路径字段不是可配置的别名：它们必须精确指向以上文件名，且不得复用同一个文件。
 
 ## `pet.json`
 
-所有包必须有 `schemaVersion: 1`、稳定的 `id`、`displayName`、`renderType`、`thumbnailPath: "thumbnail.png"` 与 `dialoguesPath: "dialogues.json"`。资源路径均相对包根目录，且不得包含 `..`。
+所有包必须有 `schemaVersion: 1`、稳定的 `id`、`displayName`、`renderType`、`thumbnailPath: "thumbnail.png"` 与 `dialoguesPath: "dialogues.json"`。
+
+ID 只能使用小写 ASCII 字母、数字、`.`、`_`、`-`，长度 3–64；内置包必须使用 `qpet-` 前缀，用户包必须使用 `user.` 前缀。用户包不得覆盖内置 ID 或既有用户 ID。资源路径均相对包根目录，且不得包含 `..`、反斜杠、目录分隔符或绝对路径。
 
 ### `sprite-atlas-v2`
 
@@ -18,11 +25,11 @@
 }
 ```
 
-图集固定为透明 RGBA WebP，`1536×2288` 像素，即 8 列 × 11 行，每格 `192×208`。行 0–8 分别为 `idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`；行 9–10 按顺时针每 22.5° 放置 16 个 look 方向。有效帧数为 `7,8,8,4,5,8,6,6,6,8,8`；其他格必须全透明。
+图集必须实际解码为带 alpha 的 RGBA WebP，固定为 `1536×2288` 像素，即 8 列 × 11 行，每格 `192×208`。行 0–8 分别为 `idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`；行 9–10 按顺时针每 22.5° 放置 16 个 look 方向。有效帧数为 `7,8,8,4,5,8,6,6,6,8,8`；每个有效格至少有 256 个非透明像素，其他格必须全透明。所有完全透明像素的 RGB 都必须为 `0,0,0`。
 
 ### `static-image-v1`
 
-该类型必须声明 `characterPath: "character.png"`。它只提供静态形象；运行时不得把它当作 v2 帧图集播放。`character.png` 与 `thumbnail.png` 均须为带 alpha 的 PNG。
+该类型必须声明 `characterPath: "character.png"`。它只提供静态形象；运行时不得把它当作 v2 帧图集播放。`character.png` 与 `thumbnail.png` 均须实际解码为带 alpha、且包含透明背景像素的 PNG。
 
 ## `dialogues.json`
 
@@ -35,7 +42,7 @@
 }
 ```
 
-每个 key 的值必须是非空字符串数组。应用可为未知事件回退到 `idle`。
+`idle`、`working`、`success`、`error` 四个 key 都是必需项，且每个值必须是非空字符串数组。应用可为未知事件回退到 `idle`。
 
 ## 验证
 

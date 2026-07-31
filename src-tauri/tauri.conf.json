@@ -43,6 +43,7 @@
         "enable": true,
         "scope": [
           "$RESOURCE/resources/pets/**",
+          "$APPDATA/pets/builtin/**",
           "$APPDATA/pets/packages/**"
         ]
       }

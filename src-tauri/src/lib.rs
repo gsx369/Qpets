@@ -3,7 +3,7 @@
 //! Both webviews are read-only clients. This module is the only writer for the
 //! settings file and user pet library, which keeps multi-window updates ordered.
 
-use image::{DynamicImage, GenericImageView, ImageReader, RgbaImage};
+use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, Limits, RgbaImage};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -29,8 +29,11 @@ const STAGING_DIR: &str = ".staging";
 const TRASH_DIR: &str = ".trash";
 const DEFAULT_PET_ID: &str = "qpet-z1-sunny-brim";
 const MAX_ARCHIVE_FILES: usize = 24;
+const MAX_ARCHIVE_SOURCE_BYTES: u64 = 48 * 1024 * 1024;
 const MAX_ARCHIVE_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: u64 = 96 * 1024 * 1024;
+const MAX_IMAGE_ALLOC_BYTES: u64 = 96 * 1024 * 1024;
+const MIN_FRAME_VISIBLE_PIXELS: usize = 256;
 const PET_BASE_WIDTH: f64 = 256.0;
 const PET_BASE_HEIGHT: f64 = 256.0;
 
@@ -188,7 +191,6 @@ struct DialogueFile {
 
 struct Store {
     root: PathBuf,
-    resource_pets: PathBuf,
     builtins: Vec<PetDescriptor>,
     persisted: PersistedState,
 }
@@ -220,19 +222,26 @@ impl Store {
 
         let packages = root.join(PETS_DIR).join(PACKAGES_DIR);
         persisted.user_pets.retain(|record| {
+            if !is_valid_pet_id(&record.id, false) {
+                return false;
+            }
             descriptor_from_package(&packages.join(&record.id), PetSource::User, false, false)
-                .is_ok()
+                .is_ok_and(|descriptor| descriptor.id == record.id)
         });
 
-        let selected_exists = builtins.iter().any(|pet| pet.id == persisted.selected_pet_id)
-            || persisted.user_pets.iter().any(|pet| pet.id == persisted.selected_pet_id);
+        let selected_exists = builtins
+            .iter()
+            .any(|pet| pet.id == persisted.selected_pet_id)
+            || persisted
+                .user_pets
+                .iter()
+                .any(|pet| pet.id == persisted.selected_pet_id);
         if !selected_exists {
             persisted.selected_pet_id = DEFAULT_PET_ID.into();
         }
 
         let store = Self {
             root,
-            resource_pets,
             builtins,
             persisted,
         };
@@ -252,8 +261,11 @@ impl Store {
         self.root.join(PETS_DIR).join(TRASH_DIR)
     }
 
-    fn package_dir(&self, id: &str) -> PathBuf {
-        self.packages_dir().join(id)
+    fn package_dir(&self, id: &str) -> CommandResult<PathBuf> {
+        if !is_valid_pet_id(id, false) {
+            return Err("自定义角色 ID 无效".into());
+        }
+        Ok(self.packages_dir().join(id))
     }
 
     fn save(&self) -> CommandResult<()> {
@@ -268,13 +280,11 @@ impl Store {
     fn app_state(&self) -> AppState {
         let mut pets = self.builtins.clone();
         pets.extend(self.persisted.user_pets.iter().filter_map(|record| {
-            descriptor_from_package(
-                &self.package_dir(&record.id),
-                PetSource::User,
-                false,
-                false,
-            )
-            .ok()
+            self.package_dir(&record.id).ok().and_then(|directory| {
+                descriptor_from_package(&directory, PetSource::User, false, false)
+                    .ok()
+                    .filter(|descriptor| descriptor.id == record.id)
+            })
         }));
         AppState {
             settings: self.persisted.settings.clone(),
@@ -322,7 +332,9 @@ fn write_json_file<T: Serialize>(path: &Path, value: &T) -> CommandResult<()> {
 /// Uses a recoverable temp -> backup -> final transaction. On startup the
 /// backup is accepted if a crash happened between the two renames.
 fn write_json_transactional<T: Serialize>(path: &Path, value: &T) -> CommandResult<()> {
-    let parent = path.parent().ok_or_else(|| "状态文件路径无效".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "状态文件路径无效".to_string())?;
     fs::create_dir_all(parent).map_err(error_text)?;
     let temporary = parent.join(format!(".state-{}.tmp", operation_id()));
     let backup = path.with_extension("json.bak");
@@ -355,11 +367,18 @@ fn load_builtins(root: &Path) -> CommandResult<Vec<PetDescriptor>> {
 
     let mut pets = Vec::with_capacity(index.pets.len());
     for entry in index.pets {
-        if entry.id != entry.package_path {
+        if !is_safe_file_name(&entry.package_path)
+            || !is_valid_pet_id(&entry.id, true)
+            || entry.id != entry.package_path
+        {
             return Err(format!("内置角色 {} 的包路径不一致", entry.id));
         }
-        let descriptor =
-            descriptor_from_package(&root.join(&entry.package_path), PetSource::Builtin, true, false)?;
+        let descriptor = descriptor_from_package(
+            &root.join(&entry.package_path),
+            PetSource::Builtin,
+            true,
+            false,
+        )?;
         if descriptor.id != entry.id {
             return Err(format!("内置角色 {} 的清单 ID 不一致", entry.id));
         }
@@ -379,15 +398,19 @@ fn is_safe_file_name(value: &str) -> bool {
 }
 
 fn is_valid_pet_id(value: &str, allow_builtin_namespace: bool) -> bool {
-    if !(3..=64).contains(&value.len()) || (!allow_builtin_namespace && value.starts_with("qpet-")) {
+    let has_expected_namespace = if allow_builtin_namespace {
+        value.starts_with("qpet-")
+    } else {
+        value.starts_with("user.")
+    };
+    if !(6..=64).contains(&value.len()) || !has_expected_namespace {
         return false;
     }
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
+    let Some(last) = value.chars().last() else {
         return false;
     };
-    (first.is_ascii_lowercase() || first.is_ascii_digit())
-        && chars.all(|character| {
+    last.is_ascii_alphanumeric()
+        && value.chars().all(|character| {
             character.is_ascii_lowercase()
                 || character.is_ascii_digit()
                 || matches!(character, '.' | '_' | '-')
@@ -407,35 +430,83 @@ fn validate_manifest(manifest: &PetManifest, source: PetSource) -> CommandResult
     if manifest.description.chars().count() > 280 {
         return Err("角色描述不能超过 280 个字符".into());
     }
-    for path in [&manifest.thumbnail_path, &manifest.dialogues_path] {
-        if !is_safe_file_name(path) {
-            return Err("角色包只能引用包根目录中的资源".into());
-        }
+    if manifest.thumbnail_path != "thumbnail.png" || manifest.dialogues_path != "dialogues.json" {
+        return Err("v1 角色包必须使用固定的 thumbnail.png 和 dialogues.json".into());
     }
     match manifest.render_type {
         RenderType::SpriteAtlasV2 => {
             if manifest.sprite_version_number != Some(2)
-                || manifest.spritesheet_path.as_deref().is_none_or(|path| !is_safe_file_name(path))
+                || manifest.spritesheet_path.as_deref() != Some("spritesheet.webp")
+                || manifest.character_path.is_some()
             {
-                return Err("动态角色必须声明 spriteVersionNumber 2 和有效图集".into());
+                return Err("动态角色必须只声明 spriteVersionNumber 2 和 spritesheet.webp".into());
             }
         }
         RenderType::StaticImageV1 => {
-            if manifest.character_path.as_deref().is_none_or(|path| !is_safe_file_name(path)) {
-                return Err("静态角色必须声明有效的 characterPath".into());
+            if manifest.character_path.as_deref() != Some("character.png")
+                || manifest.sprite_version_number.is_some()
+                || manifest.spritesheet_path.is_some()
+            {
+                return Err("静态角色必须只声明 character.png".into());
             }
         }
     }
     Ok(())
 }
 
-fn decode_image(path: &Path) -> CommandResult<DynamicImage> {
-    ImageReader::open(path)
+fn validate_package_files(directory: &Path, render_type: RenderType) -> CommandResult<()> {
+    let expected_names = match render_type {
+        RenderType::SpriteAtlasV2 => [
+            "pet.json",
+            "dialogues.json",
+            "thumbnail.png",
+            "spritesheet.webp",
+        ],
+        RenderType::StaticImageV1 => [
+            "pet.json",
+            "dialogues.json",
+            "thumbnail.png",
+            "character.png",
+        ],
+    };
+    let expected: HashSet<String> = expected_names.into_iter().map(str::to_owned).collect();
+    let mut actual = HashSet::new();
+    for entry in fs::read_dir(directory).map_err(error_text)? {
+        let entry = entry.map_err(error_text)?;
+        if !entry.file_type().map_err(error_text)?.is_file() {
+            return Err("角色包只能包含规定的根目录文件".into());
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "角色包包含无效文件名".to_string())?;
+        actual.insert(name);
+    }
+    if actual != expected {
+        return Err("角色包文件集合与 renderType 不匹配".into());
+    }
+    Ok(())
+}
+
+fn decode_image(
+    path: &Path,
+    expected_format: ImageFormat,
+    max_width: u32,
+    max_height: u32,
+) -> CommandResult<DynamicImage> {
+    let mut reader = ImageReader::open(path)
         .map_err(error_text)?
         .with_guessed_format()
-        .map_err(error_text)?
-        .decode()
-        .map_err(error_text)
+        .map_err(error_text)?;
+    if reader.format() != Some(expected_format) {
+        return Err(format!("{} 的实际图片格式与文件名不一致", path.display()));
+    }
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(max_width);
+    limits.max_image_height = Some(max_height);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC_BYTES);
+    reader.limits(limits);
+    reader.decode().map_err(error_text)
 }
 
 fn require_transparent_image(image: &DynamicImage) -> CommandResult<RgbaImage> {
@@ -443,12 +514,17 @@ fn require_transparent_image(image: &DynamicImage) -> CommandResult<RgbaImage> {
         return Err("角色图片必须包含透明通道".into());
     }
     let (width, height) = image.dimensions();
-    if width == 0 || height == 0 || width > 4096 || height > 4096 || u64::from(width) * u64::from(height) > 16_777_216 {
+    if width == 0
+        || height == 0
+        || width > 4096
+        || height > 4096
+        || u64::from(width) * u64::from(height) > 16_777_216
+    {
         return Err("角色图片尺寸无效或超过 4096×4096".into());
     }
     let rgba = image.to_rgba8();
-    if !rgba.pixels().any(|pixel| pixel[3] > 0) {
-        return Err("角色图片完全透明".into());
+    if rgba.pixels().filter(|pixel| pixel[3] > 0).count() < MIN_FRAME_VISIBLE_PIXELS {
+        return Err("角色图片缺少足够的可见像素".into());
     }
     if !rgba.pixels().any(|pixel| pixel[3] < 255) {
         return Err("角色图片没有透明背景".into());
@@ -461,19 +537,29 @@ fn validate_v2_atlas(image: &DynamicImage) -> CommandResult<RgbaImage> {
         return Err("v2 动作图集必须为带透明通道的 1536×2288 图片".into());
     }
     let rgba = image.to_rgba8();
+    if rgba
+        .pixels()
+        .any(|pixel| pixel[3] == 0 && pixel[0..3] != [0, 0, 0])
+    {
+        return Err("v2 图集的透明像素必须清空 RGB 通道".into());
+    }
     let used_columns = [7usize, 8, 8, 4, 5, 8, 6, 6, 6, 8, 8];
     for (row, used) in used_columns.into_iter().enumerate() {
         for column in 0..8usize {
-            let populated = (0..208usize).any(|y| {
-                (0..192usize).any(|x| {
+            let visible_pixels = (0..208usize)
+                .flat_map(|y| (0..192usize).map(move |x| (x, y)))
+                .filter(|(x, y)| {
                     rgba.get_pixel((column * 192 + x) as u32, (row * 208 + y) as u32)[3] > 0
                 })
-            });
-            if column < used && !populated {
+                .count();
+            if column < used && visible_pixels < MIN_FRAME_VISIBLE_PIXELS {
                 return Err(format!("v2 图集第 {} 行第 {} 格缺少有效帧", row, column));
             }
-            if column >= used && populated {
-                return Err(format!("v2 图集第 {} 行第 {} 个保留格必须透明", row, column));
+            if column >= used && visible_pixels > 0 {
+                return Err(format!(
+                    "v2 图集第 {} 行第 {} 个保留格必须透明",
+                    row, column
+                ));
             }
         }
     }
@@ -485,8 +571,17 @@ fn validate_dialogues(path: &Path) -> CommandResult<HashMap<String, Vec<String>>
     if file.schema_version != 1 || file.lines.is_empty() {
         return Err("dialogues.json 版本无效或没有台词".into());
     }
+    if ["idle", "working", "success", "error"]
+        .into_iter()
+        .any(|key| !file.lines.contains_key(key))
+    {
+        return Err("dialogues.json 必须包含 idle、working、success、error".into());
+    }
     if file.lines.values().any(|lines| {
-        lines.is_empty() || lines.iter().any(|line| line.trim().is_empty() || line.chars().count() > 120)
+        lines.is_empty()
+            || lines
+                .iter()
+                .any(|line| line.trim().is_empty() || line.chars().count() > 120)
     }) {
         return Err("dialogues.json 包含空台词或过长台词".into());
     }
@@ -506,7 +601,11 @@ fn main_asset_path<'a>(manifest: &'a PetManifest) -> CommandResult<&'a str> {
     }
 }
 
-fn generate_thumbnail(image: &DynamicImage, render_type: RenderType, destination: &Path) -> CommandResult<()> {
+fn generate_thumbnail(
+    image: &DynamicImage,
+    render_type: RenderType,
+    destination: &Path,
+) -> CommandResult<()> {
     let source = match render_type {
         RenderType::SpriteAtlasV2 => image.crop_imm(6 * 192, 0, 192, 208),
         RenderType::StaticImageV1 => image.clone(),
@@ -517,6 +616,12 @@ fn generate_thumbnail(image: &DynamicImage, render_type: RenderType, destination
         .map_err(error_text)
 }
 
+fn validate_thumbnail(path: &Path) -> CommandResult<()> {
+    let image = decode_image(path, ImageFormat::Png, 512, 512)?;
+    require_transparent_image(&image)?;
+    Ok(())
+}
+
 fn descriptor_from_package(
     directory: &Path,
     source: PetSource,
@@ -525,12 +630,16 @@ fn descriptor_from_package(
 ) -> CommandResult<PetDescriptor> {
     let manifest: PetManifest = read_json(&directory.join("pet.json"))?;
     validate_manifest(&manifest, source)?;
+    validate_package_files(directory, manifest.render_type)?;
     let asset = directory.join(main_asset_path(&manifest)?);
     let thumbnail = directory.join(&manifest.thumbnail_path);
     let dialogues = validate_dialogues(&directory.join(&manifest.dialogues_path))?;
 
     if validate_pixels || refresh_thumbnail {
-        let image = decode_image(&asset)?;
+        let image = match manifest.render_type {
+            RenderType::SpriteAtlasV2 => decode_image(&asset, ImageFormat::WebP, 1536, 2288)?,
+            RenderType::StaticImageV1 => decode_image(&asset, ImageFormat::Png, 4096, 4096)?,
+        };
         match manifest.render_type {
             RenderType::SpriteAtlasV2 => {
                 validate_v2_atlas(&image)?;
@@ -546,6 +655,7 @@ fn descriptor_from_package(
     if !asset.is_file() || !thumbnail.is_file() {
         return Err("角色包缺少主资源或缩略图".into());
     }
+    validate_thumbnail(&thumbnail)?;
 
     Ok(PetDescriptor {
         id: manifest.id,
@@ -594,13 +704,17 @@ fn default_dialogues(name: &str) -> DialogueFile {
 
 fn install_staged(store: &mut Store, staging: &Path) -> CommandResult<PetDescriptor> {
     let descriptor = descriptor_from_package(staging, PetSource::User, true, true)?;
+    let verified = descriptor_from_package(staging, PetSource::User, true, false)?;
+    if verified.id != descriptor.id {
+        return Err("角色包在安装验证期间发生变化".into());
+    }
     if store.has_pet(&descriptor.id) {
         return Err(format!("角色 ID {} 已存在", descriptor.id));
     }
 
-    let destination = store.package_dir(&descriptor.id);
+    let destination = store.package_dir(&descriptor.id)?;
     fs::rename(staging, &destination).map_err(error_text)?;
-    let previous_selected = store.persisted.selected_pet_id.clone();
+    let previous_persisted = store.persisted.clone();
     store.persisted.user_pets.push(UserPetRecord {
         id: descriptor.id.clone(),
         installed_at: unix_seconds(),
@@ -608,15 +722,37 @@ fn install_staged(store: &mut Store, staging: &Path) -> CommandResult<PetDescrip
     store.persisted.selected_pet_id = descriptor.id.clone();
 
     if let Err(error) = store.save() {
-        store.persisted.user_pets.retain(|record| record.id != descriptor.id);
-        store.persisted.selected_pet_id = previous_selected;
-        let _ = fs::rename(&destination, staging);
-        return Err(error);
+        store.persisted = previous_persisted;
+        return match fs::rename(&destination, staging) {
+            Ok(()) => Err(error),
+            Err(rollback_error) => Err(format!("{error}；角色目录回滚失败：{rollback_error}")),
+        };
     }
-    descriptor_from_package(&destination, PetSource::User, false, false)
+    match descriptor_from_package(&destination, PetSource::User, false, false) {
+        Ok(installed) => Ok(installed),
+        Err(error) => {
+            store.persisted = previous_persisted;
+            let state_rollback = store.save();
+            let directory_rollback = fs::rename(&destination, staging);
+            match (state_rollback, directory_rollback) {
+                (Ok(()), Ok(())) => Err(error),
+                (state_result, directory_result) => Err(format!(
+                    "{error}；安装回滚不完整（状态：{}，目录：{}）",
+                    state_result.err().unwrap_or_else(|| "成功".into()),
+                    directory_result
+                        .err()
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "成功".into())
+                )),
+            }
+        }
+    }
 }
 
 fn extract_qpet(source: &Path, destination: &Path) -> CommandResult<()> {
+    if fs::metadata(source).map_err(error_text)?.len() > MAX_ARCHIVE_SOURCE_BYTES {
+        return Err("角色包压缩文件超过 48 MiB 限制".into());
+    }
     let file = File::open(source).map_err(error_text)?;
     let mut archive = ZipArchive::new(BufReader::new(file)).map_err(error_text)?;
     if archive.len() == 0 || archive.len() > MAX_ARCHIVE_FILES {
@@ -638,7 +774,10 @@ fn extract_qpet(source: &Path, destination: &Path) -> CommandResult<()> {
         if entry.is_dir() {
             continue;
         }
-        if entry.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
             return Err("角色包不能包含符号链接".into());
         }
         let enclosed = entry
@@ -657,7 +796,8 @@ fn extract_qpet(source: &Path, destination: &Path) -> CommandResult<()> {
         if entry.size() > MAX_ARCHIVE_FILE_BYTES {
             return Err(format!("角色包文件过大：{name}"));
         }
-        total = total.saturating_add(entry.size());
+        let expected_size = entry.size();
+        total = total.saturating_add(expected_size);
         if total > MAX_ARCHIVE_BYTES {
             return Err("角色包解压后总大小超过限制".into());
         }
@@ -674,7 +814,10 @@ fn extract_qpet(source: &Path, destination: &Path) -> CommandResult<()> {
             .create_new(true)
             .open(output_path)
             .map_err(error_text)?;
-        io::copy(&mut entry, &mut output).map_err(error_text)?;
+        let copied = io::copy(&mut entry, &mut output).map_err(error_text)?;
+        if copied != expected_size || copied > MAX_ARCHIVE_FILE_BYTES {
+            return Err(format!("角色包文件实际大小异常：{name}"));
+        }
         output.sync_all().map_err(error_text)?;
     }
     if !seen.contains("pet.json") {
@@ -789,7 +932,12 @@ fn import_static_pet(
     }
 
     let display_name = name
-        .or_else(|| source.file_stem().and_then(|value| value.to_str()).map(str::to_owned))
+        .or_else(|| {
+            source
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
         .unwrap_or_else(|| "自定义角色".into());
     let prefix = slug(&display_name);
     let id = format!(
@@ -798,7 +946,12 @@ fn import_static_pet(
         operation_id()
     );
 
-    let image = decode_image(&source)?;
+    let expected_format = if extension == "png" {
+        ImageFormat::Png
+    } else {
+        ImageFormat::WebP
+    };
+    let image = decode_image(&source, expected_format, 4096, 4096)?;
     require_transparent_image(&image)?;
 
     let mut store = store.lock().map_err(error_text)?;
@@ -808,8 +961,15 @@ fn import_static_pet(
         image
             .save_with_format(staging.join("character.png"), image::ImageFormat::Png)
             .map_err(error_text)?;
-        generate_thumbnail(&image, RenderType::StaticImageV1, &staging.join("thumbnail.png"))?;
-        write_json_file(&staging.join("dialogues.json"), &default_dialogues(&display_name))?;
+        generate_thumbnail(
+            &image,
+            RenderType::StaticImageV1,
+            &staging.join("thumbnail.png"),
+        )?;
+        write_json_file(
+            &staging.join("dialogues.json"),
+            &default_dialogues(&display_name),
+        )?;
         write_json_file(
             &staging.join("pet.json"),
             &PetManifest {
@@ -853,7 +1013,9 @@ fn import_pet_package(
         return Err("选择的角色包不存在".into());
     }
     let mut store = store.lock().map_err(error_text)?;
-    let staging = store.staging_dir().join(format!("import-{}", operation_id()));
+    let staging = store
+        .staging_dir()
+        .join(format!("import-{}", operation_id()));
     let result = (|| {
         extract_qpet(&source, &staging)?;
         install_staged(&mut store, &staging)
@@ -881,6 +1043,9 @@ fn delete_pet(
     if store.builtins.iter().any(|pet| pet.id == pet_id) {
         return Err("内置角色受保护，不能删除".into());
     }
+    if !is_valid_pet_id(&pet_id, false) {
+        return Err("自定义角色 ID 无效".into());
+    }
     let index = store
         .persisted
         .user_pets
@@ -888,7 +1053,7 @@ fn delete_pet(
         .position(|record| record.id == pet_id)
         .ok_or_else(|| "自定义角色不存在".to_string())?;
 
-    let source = store.package_dir(&pet_id);
+    let source = store.package_dir(&pet_id)?;
     let trash = store
         .trash_dir()
         .join(format!("{}-{}", pet_id, operation_id()));
@@ -951,6 +1116,52 @@ fn hide_instead_of_close(window: &WebviewWindow) {
     });
 }
 
+fn prepare_dev_builtins(source: &Path, destination: &Path) -> CommandResult<()> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "开发资源目标路径无效".to_string())?;
+    fs::create_dir_all(parent).map_err(error_text)?;
+    let staging = parent.join(format!(".builtin-{}", operation_id()));
+    fs::create_dir(&staging).map_err(error_text)?;
+
+    let result = (|| {
+        let index: PetIndex = read_json(&source.join("index.json"))?;
+        fs::copy(source.join("index.json"), staging.join("index.json")).map_err(error_text)?;
+        for entry in index.pets {
+            if !is_safe_file_name(&entry.package_path)
+                || !is_valid_pet_id(&entry.id, true)
+                || entry.id != entry.package_path
+            {
+                return Err("开发资源索引包含无效包路径".into());
+            }
+            let source_package = source.join(&entry.package_path);
+            let target_package = staging.join(&entry.package_path);
+            fs::create_dir(&target_package).map_err(error_text)?;
+            for name in [
+                "pet.json",
+                "dialogues.json",
+                "thumbnail.png",
+                "spritesheet.webp",
+                "character.png",
+            ] {
+                let source_file = source_package.join(name);
+                if source_file.is_file() {
+                    fs::copy(&source_file, target_package.join(name)).map_err(error_text)?;
+                }
+            }
+        }
+        if destination.exists() {
+            fs::remove_dir_all(destination).map_err(error_text)?;
+        }
+        fs::rename(&staging, destination).map_err(error_text)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging);
+    }
+    result
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -966,14 +1177,19 @@ pub fn run() {
             let resource_pets = if bundled.is_dir() {
                 bundled
             } else {
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("resources")
-                    .join("pets")
+                    .join("pets");
+                let destination = root.join(PETS_DIR).join("builtin");
+                prepare_dev_builtins(&source, &destination).map_err(io::Error::other)?;
+                destination
             };
             let store = Store::open(root, resource_pets).map_err(io::Error::other)?;
             apply_window_settings(app.handle(), &store.persisted.settings)
                 .map_err(io::Error::other)?;
-            if let Err(error) = apply_autostart(app.handle(), store.persisted.settings.start_with_windows) {
+            if let Err(error) =
+                apply_autostart(app.handle(), store.persisted.settings.start_with_windows)
+            {
                 eprintln!("failed to synchronize autostart: {error}");
             }
             app.manage(Mutex::new(store));
@@ -1027,7 +1243,10 @@ mod tests {
     #[test]
     fn pet_ids_are_scoped_and_portable() {
         assert!(is_valid_pet_id("user.sunny-01", false));
+        assert!(is_valid_pet_id("qpet-built-in", true));
         assert!(!is_valid_pet_id("qpet-built-in", false));
+        assert!(!is_valid_pet_id("qpet.built-in", false));
+        assert!(!is_valid_pet_id("user.sunny-", false));
         assert!(!is_valid_pet_id("UpperCase", false));
         assert!(!is_valid_pet_id("../escape", false));
     }

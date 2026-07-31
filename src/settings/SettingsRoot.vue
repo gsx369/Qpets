@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 
 import { resolveAssetUrl, useAppRuntime } from '../shared/runtime'
 import type { AppSettings } from '../shared/types'
@@ -27,11 +27,16 @@ function updateInteractionSettings(settings: AppSettings) {
 }
 
 onMounted(() => void runtime.initialize())
+onBeforeUnmount(() => runtime.dispose())
 </script>
 
 <template>
   <div class="settings-root">
+    <div v-if="!runtime.ready.value" class="settings-loading" role="status" aria-live="polite">
+      正在加载设置…
+    </div>
     <SettingsPage
+      v-else
       :characters="characters"
       :interaction-settings="runtime.state.settings"
       :about="{

@@ -26,6 +26,7 @@ let gazeTimer: ReturnType<typeof setInterval> | undefined
 let gazePolling = false
 let clickIndex = 0
 let dragStart: { x: number; y: number } | undefined
+let activePointerId: number | undefined
 let dragging = false
 
 const clickActions: PetAction[] = ['waving', 'review', 'waving', 'jumping']
@@ -84,6 +85,7 @@ function interact() {
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   dragStart = { x: event.screenX, y: event.screenY }
+  activePointerId = event.pointerId
   dragging = false
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
@@ -95,14 +97,21 @@ function onPointerMove(event: PointerEvent) {
   if (Math.hypot(dx, dy) < 6) return
   dragging = true
   setAction(dx < 0 ? 'running-left' : 'running-right')
-  if (isTauriRuntime()) void getCurrentWindow().startDragging()
+  if (isTauriRuntime()) {
+    void getCurrentWindow().startDragging().catch(() => {
+      // The window can reject a drag while its native state changes; keep the
+      // gesture as a drag instead of turning the eventual pointerup into a click.
+    })
+  }
   actionTimer = setTimeout(finishAction, 1_200)
 }
 
-function onPointerUp() {
+function onPointerUp(event?: PointerEvent) {
+  if (event && activePointerId !== undefined && event.pointerId !== activePointerId) return
   if (!dragStart) return
   const wasDragging = dragging
   dragStart = undefined
+  activePointerId = undefined
   dragging = false
   if (wasDragging) actionTimer = setTimeout(finishAction, 240)
   else interact()
@@ -151,6 +160,8 @@ onMounted(() => {
   void runtime.initialize()
   scheduleIdle()
   gazeTimer = setInterval(() => void pollGaze(), 100)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
 })
 
 onBeforeUnmount(() => {
@@ -158,6 +169,9 @@ onBeforeUnmount(() => {
   if (bubbleTimer) clearTimeout(bubbleTimer)
   if (actionTimer) clearTimeout(actionTimer)
   if (gazeTimer) clearInterval(gazeTimer)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
+  runtime.dispose()
 })
 </script>
 

@@ -26,12 +26,28 @@ const state = reactive<AppState>(cloneMockState())
 const ready = ref(false)
 const busy = ref(false)
 const error = ref<string>()
-let initialized = false
+let confirmedSettings: AppSettings = { ...state.settings }
+let initializingPromise: Promise<void> | undefined
+let stopStateListener: (() => void) | undefined
+let mutationTail: Promise<void> = Promise.resolve()
+let settingsTimer: ReturnType<typeof setTimeout> | undefined
+let pendingSettings: AppSettings | undefined
+let pendingSettingsBefore: AppSettings | undefined
+let pendingSettingsResolvers: Array<() => void> = []
+let settingsIntent = 0
+let settledSettingsIntent = 0
 
-function replaceState(next: AppState) {
+function replaceState(next: AppState, preserveOptimisticSettings = false) {
+  const optimisticSettings = preserveOptimisticSettings ? { ...state.settings } : undefined
+  confirmedSettings = { ...next.settings }
   state.settings = { ...next.settings }
   state.selectedPetId = next.selectedPetId
   state.pets = next.pets.map((pet) => ({ ...pet, dialogues: { ...pet.dialogues } }))
+  if (optimisticSettings) state.settings = optimisticSettings
+}
+
+function applyIncomingState(next: AppState) {
+  replaceState(next, settledSettingsIntent < settingsIntent)
 }
 
 function messageFrom(errorValue: unknown): string {
@@ -51,23 +67,40 @@ async function runMutation<T>(operation: () => Promise<T>): Promise<T | undefine
   }
 }
 
+function enqueueMutation<T>(operation: () => Promise<T>): Promise<T | undefined> {
+  const queued = mutationTail.then(() => runMutation(operation), () => runMutation(operation))
+  mutationTail = queued.then(() => undefined, () => undefined)
+  return queued
+}
+
 async function initialize() {
-  if (initialized) return
-  initialized = true
+  if (ready.value) return
+  if (initializingPromise) return initializingPromise
 
-  if (!isTauriRuntime()) {
-    ready.value = true
-    return
-  }
+  initializingPromise = (async () => {
+    if (!isTauriRuntime()) {
+      ready.value = true
+      return
+    }
 
-  try {
-    replaceState(await invoke<AppState>('get_app_state'))
-    await listen<AppState>('qpets://state-changed', (event) => replaceState(event.payload))
-  } catch (cause) {
-    error.value = messageFrom(cause)
-  } finally {
-    ready.value = true
-  }
+    try {
+      stopStateListener?.()
+      stopStateListener = await listen<AppState>('qpets://state-changed', (event) => applyIncomingState(event.payload))
+      // Subscribe before reading the snapshot: an update before this request is
+      // included by the snapshot, and an update afterwards is received by the listener.
+      applyIncomingState(await invoke<AppState>('get_app_state'))
+      ready.value = true
+    } catch (cause) {
+      stopStateListener?.()
+      stopStateListener = undefined
+      ready.value = false
+      error.value = messageFrom(cause)
+    } finally {
+      initializingPromise = undefined
+    }
+  })()
+
+  return initializingPromise
 }
 
 async function selectPet(petId: string) {
@@ -75,17 +108,59 @@ async function selectPet(petId: string) {
     state.selectedPetId = petId
     return
   }
-  await runMutation(async () => replaceState(await invoke<AppState>('select_pet', { petId })))
+  await enqueueMutation(async () => {
+    const next = await invoke<AppState>('select_pet', { petId })
+    applyIncomingState(next)
+  })
 }
 
-async function updateSettings(settings: AppSettings) {
+function updateSettings(settings: AppSettings): Promise<void> {
   const previous = { ...state.settings }
+  settingsIntent += 1
   state.settings = { ...settings }
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime()) {
+    settledSettingsIntent = settingsIntent
+    return Promise.resolve()
+  }
 
-  const result = await runMutation(() => invoke<AppState>('update_settings', { settings }))
-  if (result) replaceState(result)
-  else state.settings = previous
+  pendingSettingsBefore ??= previous
+  pendingSettings = { ...settings }
+
+  return new Promise((resolve) => {
+    pendingSettingsResolvers.push(resolve)
+    if (settingsTimer) clearTimeout(settingsTimer)
+    settingsTimer = setTimeout(() => {
+      settingsTimer = undefined
+      void flushPendingSettings()
+    }, 120)
+  })
+}
+
+async function flushPendingSettings() {
+  const settings = pendingSettings
+  const previous = pendingSettingsBefore
+  const intent = settingsIntent
+  const resolvers = pendingSettingsResolvers
+  pendingSettings = undefined
+  pendingSettingsBefore = undefined
+  pendingSettingsResolvers = []
+  if (!settings) {
+    resolvers.forEach(resolve => resolve())
+    return
+  }
+
+  const result = await enqueueMutation(() => invoke<AppState>('update_settings', { settings }))
+  if (result) {
+    confirmedSettings = { ...result.settings }
+    if (intent === settingsIntent) {
+      settledSettingsIntent = intent
+      replaceState(result)
+    }
+  } else if (previous && intent === settingsIntent) {
+    settledSettingsIntent = intent
+    state.settings = { ...confirmedSettings }
+  }
+  resolvers.forEach(resolve => resolve())
 }
 
 async function addStaticPet() {
@@ -99,9 +174,9 @@ async function addStaticPet() {
     filters: [{ name: '透明角色图片', extensions: ['png', 'webp'] }],
   })
   if (typeof sourcePath !== 'string') return
-  await runMutation(async () => {
+  await enqueueMutation(async () => {
     await invoke<PetDescriptor>('import_static_pet', { sourcePath })
-    replaceState(await invoke<AppState>('get_app_state'))
+    applyIncomingState(await invoke<AppState>('get_app_state'))
   })
 }
 
@@ -116,9 +191,9 @@ async function importPetPackage() {
     filters: [{ name: 'Qpets 角色包', extensions: ['qpet', 'zip'] }],
   })
   if (typeof sourcePath !== 'string') return
-  await runMutation(async () => {
+  await enqueueMutation(async () => {
     await invoke<PetDescriptor>('import_pet_package', { sourcePath })
-    replaceState(await invoke<AppState>('get_app_state'))
+    applyIncomingState(await invoke<AppState>('get_app_state'))
   })
 }
 
@@ -128,7 +203,7 @@ async function deletePet(petId: string) {
     if (state.selectedPetId === petId) state.selectedPetId = MOCK_STATE.selectedPetId
     return
   }
-  await runMutation(async () => replaceState(await invoke<AppState>('delete_pet', { petId })))
+  await enqueueMutation(async () => applyIncomingState(await invoke<AppState>('delete_pet', { petId })))
 }
 
 async function openSettings() {
@@ -142,6 +217,18 @@ async function visitHomepage(url: string) {
 
 export function dismissError() {
   error.value = undefined
+}
+
+export function disposeAppRuntime() {
+  if (settingsTimer) clearTimeout(settingsTimer)
+  settingsTimer = undefined
+  pendingSettingsResolvers.forEach(resolve => resolve())
+  pendingSettingsResolvers = []
+  pendingSettings = undefined
+  pendingSettingsBefore = undefined
+  stopStateListener?.()
+  stopStateListener = undefined
+  ready.value = false
 }
 
 export function useAppRuntime() {
@@ -160,5 +247,6 @@ export function useAppRuntime() {
     openSettings,
     visitHomepage,
     dismissError,
+    dispose: disposeAppRuntime,
   }
 }
