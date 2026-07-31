@@ -588,7 +588,7 @@ fn validate_dialogues(path: &Path) -> CommandResult<HashMap<String, Vec<String>>
     Ok(file.lines)
 }
 
-fn main_asset_path<'a>(manifest: &'a PetManifest) -> CommandResult<&'a str> {
+fn main_asset_path(manifest: &PetManifest) -> CommandResult<&str> {
     match manifest.render_type {
         RenderType::SpriteAtlasV2 => manifest
             .spritesheet_path
@@ -755,7 +755,7 @@ fn extract_qpet(source: &Path, destination: &Path) -> CommandResult<()> {
     }
     let file = File::open(source).map_err(error_text)?;
     let mut archive = ZipArchive::new(BufReader::new(file)).map_err(error_text)?;
-    if archive.len() == 0 || archive.len() > MAX_ARCHIVE_FILES {
+    if archive.is_empty() || archive.len() > MAX_ARCHIVE_FILES {
         return Err("角色包文件数量无效".into());
     }
     let allowed = HashSet::from([
@@ -1260,8 +1260,10 @@ mod tests {
 
     #[test]
     fn settings_reject_out_of_range_values() {
-        let mut settings = Settings::default();
-        settings.scale = 2.0;
+        let settings = Settings {
+            scale: 2.0,
+            ..Settings::default()
+        };
         assert!(settings.validate().is_err());
     }
 }
