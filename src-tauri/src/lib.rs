@@ -539,7 +539,7 @@ fn validate_v2_atlas(image: &DynamicImage) -> CommandResult<RgbaImage> {
     let rgba = image.to_rgba8();
     if rgba
         .pixels()
-        .any(|pixel| pixel[3] == 0 && pixel[0..3] != [0, 0, 0])
+        .any(|pixel| pixel[3] == 0 && (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0))
     {
         return Err("v2 图集的透明像素必须清空 RGB 通道".into());
     }
