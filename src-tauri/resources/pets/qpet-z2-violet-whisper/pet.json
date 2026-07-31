@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "qpet-z2-violet-whisper",
+  "displayName": "堇语",
+  "description": "手持紫花的安静桌面伙伴。",
+  "renderType": "sprite-atlas-v2",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
+  "thumbnailPath": "thumbnail.png",
+  "dialoguesPath": "dialogues.json"
+}

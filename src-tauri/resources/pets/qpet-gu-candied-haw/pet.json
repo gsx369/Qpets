@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "qpet-gu-candied-haw",
+  "displayName": "糖葫芦",
+  "description": "橙金汉服风格的静态桌面伙伴。",
+  "renderType": "static-image-v1",
+  "characterPath": "character.png",
+  "thumbnailPath": "thumbnail.png",
+  "dialoguesPath": "dialogues.json"
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "qpet-z1-sunny-brim",
+  "displayName": "晴檐",
+  "description": "戴草帽的温柔桌面伙伴。",
+  "renderType": "sprite-atlas-v2",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
+  "thumbnailPath": "thumbnail.png",
+  "dialoguesPath": "dialogues.json"
+}

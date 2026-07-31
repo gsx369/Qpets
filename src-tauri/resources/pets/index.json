@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "defaultPetId": "qpet-z1-sunny-brim",
+  "pets": [
+    { "id": "qpet-z1-sunny-brim", "packagePath": "qpet-z1-sunny-brim" },
+    { "id": "qpet-z2-violet-whisper", "packagePath": "qpet-z2-violet-whisper" },
+    { "id": "qpet-gu-candied-haw", "packagePath": "qpet-gu-candied-haw" }
+  ]
+}
