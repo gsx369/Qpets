@@ -7,6 +7,7 @@ import type { PetAction } from '../shared/types'
 import AtlasPet from './AtlasPet.vue'
 import StaticPet from './StaticPet.vue'
 import { vectorToLookIndex } from './atlas'
+import { choosePetRenderMode } from './render-state'
 import '../styles/pet.css'
 
 const runtime = useAppRuntime()
@@ -14,10 +15,21 @@ const action = ref<PetAction>('idle')
 const actionToken = ref(0)
 const lookIndex = ref<number>()
 const bubbleText = ref('')
-const assetLoadFailed = ref(false)
+const primaryLoadFailed = ref(false)
+const fallbackLoadFailed = ref(false)
+const resourceRetryToken = ref(0)
 
 const selectedPet = computed(() => runtime.selectedPet.value)
 const source = computed(() => resolveAssetUrl(selectedPet.value?.assetPath ?? ''))
+const thumbnailSource = computed(() => resolveAssetUrl(selectedPet.value?.thumbnailPath ?? ''))
+const staticSource = computed(() => primaryLoadFailed.value ? thumbnailSource.value : source.value)
+const renderMode = computed(() => choosePetRenderMode(
+  runtime.ready.value,
+  selectedPet.value?.renderType,
+  source.value,
+  primaryLoadFailed.value,
+  thumbnailSource.value,
+))
 
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 let bubbleTimer: ReturnType<typeof setTimeout> | undefined
@@ -149,9 +161,14 @@ async function pollGaze() {
 }
 
 watch(() => selectedPet.value?.id, () => {
-  assetLoadFailed.value = false
   bubbleText.value = ''
   setAction('idle')
+})
+
+watch([() => selectedPet.value?.id, source, thumbnailSource], () => {
+  primaryLoadFailed.value = false
+  fallbackLoadFailed.value = false
+  resourceRetryToken.value += 1
 })
 
 watch(() => runtime.state.settings.idleIntervalSeconds, scheduleIdle)
@@ -173,6 +190,22 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointercancel', onPointerUp)
   runtime.dispose()
 })
+
+function onStaticLoadError() {
+  if (!primaryLoadFailed.value && thumbnailSource.value && thumbnailSource.value !== source.value) {
+    primaryLoadFailed.value = true
+    return
+  }
+  fallbackLoadFailed.value = true
+}
+
+function retryPetLoad() {
+  runtime.dismissError()
+  primaryLoadFailed.value = false
+  fallbackLoadFailed.value = false
+  resourceRetryToken.value += 1
+  if (!runtime.ready.value) void runtime.initialize()
+}
 </script>
 
 <template>
@@ -191,36 +224,38 @@ onBeforeUnmount(() => {
     </Transition>
 
     <div class="pet-stage" :class="{ 'is-busy': runtime.busy.value }">
-      <template v-if="selectedPet">
+      <template v-if="selectedPet && renderMode === 'atlas'">
         <AtlasPet
-          v-if="selectedPet.renderType === 'sprite-atlas-v2' && source && !assetLoadFailed"
-          :key="selectedPet.id"
+          :key="`${selectedPet.id}-${resourceRetryToken}`"
           :source="source"
           :action="action"
           :action-token="actionToken"
           :look-index="lookIndex"
           @complete="finishAction"
-          @load-error="assetLoadFailed = true"
-        />
-        <StaticPet
-          v-else
-          :key="`${selectedPet.id}-${actionToken}`"
-          :source="assetLoadFailed ? '' : source"
-          :name="selectedPet.displayName"
-          :action="action"
-          :look-index="lookIndex"
+          @load-error="primaryLoadFailed = true"
         />
       </template>
+      <StaticPet
+        v-else-if="selectedPet && renderMode === 'static'"
+        :key="`${selectedPet.id}-${resourceRetryToken}`"
+        :source="staticSource"
+        :name="selectedPet.displayName"
+        :action="action"
+        :look-index="lookIndex"
+        @load-error="onStaticLoadError"
+      />
+      <div v-else class="pet-loading" aria-hidden="true"><span /></div>
     </div>
 
     <button
-      v-if="assetLoadFailed"
+      v-if="runtime.error.value || primaryLoadFailed || fallbackLoadFailed"
       type="button"
       class="pet-error"
-      title="角色资源无法加载，打开设置查看"
+      title="角色暂时未能完整加载，点击重试"
+      aria-label="重试加载角色"
       @pointerdown.stop
       @pointerup.stop
-      @click.stop="runtime.openSettings"
+      @click.stop="retryPetLoad"
     >
       !
     </button>

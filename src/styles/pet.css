@@ -80,18 +80,23 @@
   animation: static-drag-right 420ms ease-in-out infinite alternate;
 }
 
-.pet-placeholder {
+.pet-loading {
   display: grid;
-  width: 148px;
-  height: 168px;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 48px;
   place-items: center;
-  border: 2px solid rgb(255 255 255 / 75%);
-  border-radius: 44% 44% 38% 38%;
-  color: #8b637a;
-  background: linear-gradient(145deg, #fff7ed, #f5d7df);
-  box-shadow: 0 8px 18px rgb(60 40 50 / 15%);
-  font-size: 54px;
-  font-weight: 700;
+  pointer-events: none;
+}
+
+.pet-loading span {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 2px solid rgb(139 99 122 / 22%);
+  border-top-color: rgb(139 99 122 / 72%);
+  border-radius: 50%;
+  animation: pet-loading-spin .8s linear infinite;
 }
 
 .pet-bubble {
@@ -173,9 +178,17 @@
   to { transform: rotate(4deg) translateY(-2px); }
 }
 
+@keyframes pet-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .static-pet img {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
+  }
+
+  .pet-loading span {
+    animation: none;
   }
 }

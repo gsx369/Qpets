@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, reactive, readonly, ref } from 'vue'
 
 import { MOCK_STATE } from './mock-state'
+import { RUNTIME_INITIALIZE_RETRY_DELAYS_MS, retryDelayAfterFailure, waitForRetry } from './retry'
 import type { AppSettings, AppState, PetDescriptor, PetMetadataDraft } from './types'
 
 function cloneMockState(): AppState {
@@ -28,6 +29,7 @@ const busy = ref(false)
 const error = ref<string>()
 let confirmedSettings: AppSettings = { ...state.settings }
 let initializingPromise: Promise<void> | undefined
+let initializationGeneration = 0
 let stopStateListener: (() => void) | undefined
 let mutationTail: Promise<void> = Promise.resolve()
 let settingsTimer: ReturnType<typeof setTimeout> | undefined
@@ -48,6 +50,47 @@ function replaceState(next: AppState, preserveOptimisticSettings = false) {
 
 function applyIncomingState(next: AppState) {
   replaceState(next, settledSettingsIntent < settingsIntent)
+}
+
+function makeIdempotent(action: () => void): () => void {
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    action()
+  }
+}
+
+async function recoverStateListener(generation: number) {
+  let failedAttemptIndex = 0
+  while (generation === initializationGeneration && ready.value && !stopStateListener) {
+    const delay = retryDelayAfterFailure(RUNTIME_INITIALIZE_RETRY_DELAYS_MS, failedAttemptIndex)
+    if (delay === undefined) return
+    failedAttemptIndex += 1
+    await waitForRetry(delay)
+    if (generation !== initializationGeneration || !ready.value || stopStateListener) return
+
+    let unsubscribe: (() => void) | undefined
+    try {
+      unsubscribe = makeIdempotent(
+        await listen<AppState>('qpets://state-changed', (event) => applyIncomingState(event.payload)),
+      )
+      if (generation !== initializationGeneration) {
+        unsubscribe()
+        return
+      }
+      const snapshot = await invoke<AppState>('get_app_state')
+      if (generation !== initializationGeneration) {
+        unsubscribe()
+        return
+      }
+      stopStateListener = unsubscribe
+      applyIncomingState(snapshot)
+      return
+    } catch {
+      unsubscribe?.()
+    }
+  }
 }
 
 function messageFrom(errorValue: unknown): string {
@@ -77,28 +120,68 @@ async function initialize() {
   if (ready.value) return
   if (initializingPromise) return initializingPromise
 
-  initializingPromise = (async () => {
+  const generation = ++initializationGeneration
+  const operation = (async () => {
     if (!isTauriRuntime()) {
-      ready.value = true
+      if (generation === initializationGeneration) ready.value = true
       return
     }
 
-    try {
-      stopStateListener?.()
-      stopStateListener = await listen<AppState>('qpets://state-changed', (event) => applyIncomingState(event.payload))
-      // Subscribe before reading the snapshot: an update before this request is
-      // included by the snapshot, and an update afterwards is received by the listener.
-      applyIncomingState(await invoke<AppState>('get_app_state'))
-      ready.value = true
-    } catch (cause) {
-      stopStateListener?.()
-      stopStateListener = undefined
-      ready.value = false
-      error.value = messageFrom(cause)
-    } finally {
-      initializingPromise = undefined
+    error.value = undefined
+    let failedAttemptIndex = 0
+    while (generation === initializationGeneration && !ready.value) {
+      let unsubscribe: (() => void) | undefined
+      try {
+        stopStateListener?.()
+        stopStateListener = undefined
+        try {
+          unsubscribe = makeIdempotent(
+            await listen<AppState>('qpets://state-changed', (event) => applyIncomingState(event.payload)),
+          )
+        } catch {
+          const snapshot = await invoke<AppState>('get_app_state')
+          if (generation !== initializationGeneration) return
+          applyIncomingState(snapshot)
+          ready.value = true
+          error.value = undefined
+          void recoverStateListener(generation)
+          return
+        }
+        if (generation !== initializationGeneration) {
+          unsubscribe()
+          return
+        }
+        stopStateListener = unsubscribe
+        // Subscribe before reading the snapshot: an update before this request is
+        // included by the snapshot, and an update afterwards is received by the listener.
+        const snapshot = await invoke<AppState>('get_app_state')
+        if (generation !== initializationGeneration) return
+        applyIncomingState(snapshot)
+        ready.value = true
+        error.value = undefined
+      } catch (cause) {
+        if (unsubscribe && stopStateListener === unsubscribe) {
+          unsubscribe()
+          stopStateListener = undefined
+        } else {
+          unsubscribe?.()
+        }
+        if (generation !== initializationGeneration) return
+        const delay = retryDelayAfterFailure(RUNTIME_INITIALIZE_RETRY_DELAYS_MS, failedAttemptIndex)
+        if (delay === undefined) {
+          ready.value = false
+          error.value = `应用初始化失败：${messageFrom(cause)}`
+          break
+        }
+        failedAttemptIndex += 1
+        await waitForRetry(delay)
+      }
     }
   })()
+  initializingPromise = operation
+  void operation.finally(() => {
+    if (initializingPromise === operation) initializingPromise = undefined
+  })
 
   return initializingPromise
 }
@@ -260,6 +343,8 @@ export function dismissError() {
 }
 
 export function disposeAppRuntime() {
+  initializationGeneration += 1
+  initializingPromise = undefined
   if (settingsTimer) clearTimeout(settingsTimer)
   settingsTimer = undefined
   pendingSettingsResolvers.forEach(resolve => resolve())

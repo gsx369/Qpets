@@ -16,12 +16,12 @@ const props = withDefaults(defineProps<{
   initialSection?: SettingsSection
 }>(), {
   characters: () => [
-    { id: 'qpet-z1-sunny-brim', name: '晴檐', builtIn: true, active: true, description: '戴草帽的温柔桌面伙伴', metadataCustomized: false, modelType: '动态' },
-    { id: 'qpet-z2-violet-whisper', name: '堇语', builtIn: true, description: '藏着一枝小花的安静伙伴', metadataCustomized: false, modelType: '动态' },
-    { id: 'qpet-gu-candied-haw', name: '糖葫芦', builtIn: true, description: '手持糖葫芦的橙金汉服桌面伙伴', metadataCustomized: false, modelType: '动态' },
+    { id: 'qpet-z1-sunny-brim', name: '赵大美女', builtIn: true, active: true, description: '大美女，大设计师，P图大师，复合型人才', metadataCustomized: false, modelType: '动态' },
+    { id: 'qpet-z2-violet-whisper', name: '赵二美女', builtIn: true, description: '二美女，二设计师，P图二师，复合型人才', metadataCustomized: false, modelType: '动态' },
+    { id: 'qpet-gu-candied-haw', name: '俺滴老妹', builtIn: true, description: '世界上最可爱的人', metadataCustomized: false, modelType: '动态' },
   ],
   interactionSettings: () => ({ alwaysOnTop: true, clickThrough: false, followCursor: true, showBubble: true, startWithWindows: false, scale: 1, idleIntervalSeconds: 30 }),
-  about: () => ({ appName: 'Qpets', version: '0.1.2', description: '让每一次打开电脑，都有一位小伙伴在身边。' }),
+  about: () => ({ appName: 'Qpets', version: '0.1.3', description: '让每一次打开电脑，都有一位小伙伴在身边。' }),
   initialSection: 'library',
 })
 

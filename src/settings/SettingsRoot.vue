@@ -57,8 +57,8 @@ onBeforeUnmount(() => runtime.dispose())
       :interaction-settings="runtime.state.settings"
       :about="{
         appName: 'Qpets',
-        version: '0.1.2',
-        description: '晴檐、堇语与糖葫芦陪伴你的轻量桌面宠物。',
+        version: '0.1.3',
+        description: '让每一次打开电脑，都有一位小伙伴在身边。',
         homepage: 'https://github.com/gsx369/Qpets',
       }"
       @select-character="selectCharacter"

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "lines": {
-    "idle": ["晴檐在这里陪着你。"],
+    "idle": ["我在这里陪着你。"],
     "working": ["让我认真看看。"],
     "success": ["完成啦。"],
     "error": ["没关系，我们再试一次。"]

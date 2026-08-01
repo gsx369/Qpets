@@ -421,7 +421,10 @@ fn load_builtins(root: &Path) -> CommandResult<Vec<PetDescriptor>> {
         let descriptor = descriptor_from_package(
             &root.join(&entry.package_path),
             PetSource::Builtin,
-            true,
+            // Bundled assets are fully pixel-validated in CI. Runtime startup
+            // only needs structural validation so the pet window is not held
+            // behind three large WebP decodes on every launch.
+            false,
             false,
         )?;
         if descriptor.id != entry.id {
@@ -430,7 +433,7 @@ fn load_builtins(root: &Path) -> CommandResult<Vec<PetDescriptor>> {
         pets.push(descriptor);
     }
     if !pets.iter().any(|pet| pet.id == DEFAULT_PET_ID) {
-        return Err("缺少默认角色晴檐".into());
+        return Err("缺少默认内置角色".into());
     }
     Ok(pets)
 }
@@ -1442,6 +1445,12 @@ pub fn run() {
                 })?;
                 hide_instead_of_close(&window);
             }
+            // Tauri creates configured webviews before `setup` runs. Keep the
+            // pet hidden until Store is managed so startup work is not exposed
+            // as an empty or placeholder pet window.
+            app.get_webview_window("pet")
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "missing window pet"))?
+                .show()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

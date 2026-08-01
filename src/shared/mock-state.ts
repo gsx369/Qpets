@@ -7,8 +7,8 @@ export const MOCK_STATE: AppState = {
   pets: [
     {
       id: DEFAULT_PET_ID,
-      displayName: '晴檐',
-      description: '戴草帽的温柔桌面伙伴。',
+      displayName: '赵大美女',
+      description: '大美女，大设计师，P图大师，复合型人才',
       metadataCustomized: false,
       renderType: 'sprite-atlas-v2',
       source: 'builtin',
@@ -19,8 +19,8 @@ export const MOCK_STATE: AppState = {
     },
     {
       id: 'qpet-z2-violet-whisper',
-      displayName: '堇语',
-      description: '藏着一枝小花的安静伙伴。',
+      displayName: '赵二美女',
+      description: '二美女，二设计师，P图二师，复合型人才',
       metadataCustomized: false,
       renderType: 'sprite-atlas-v2',
       source: 'builtin',
@@ -31,8 +31,8 @@ export const MOCK_STATE: AppState = {
     },
     {
       id: 'qpet-gu-candied-haw',
-      displayName: '糖葫芦',
-      description: '带着糖葫芦的橙金汉服伙伴。',
+      displayName: '俺滴老妹',
+      description: '世界上最可爱的人',
       metadataCustomized: false,
       renderType: 'sprite-atlas-v2',
       source: 'builtin',
