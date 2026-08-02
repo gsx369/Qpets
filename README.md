@@ -55,6 +55,12 @@ python scripts/validate-pets.py --root src-tauri/resources/pets
 
 完整格式见 [docs/pet-package-v1.md](docs/pet-package-v1.md)。角色包是声明式资源，不允许携带或执行脚本。内置资源放在 `src-tauri/resources/pets`；用户资源安装到系统应用数据目录，不回写程序目录。
 
+## 参考与致谢
+
+Qpets 角色图集的制作流程，以及 `pet.json`、`spriteVersionNumber: 2`、`spritesheet.webp` 等基础约定，参考了 [YaKun9/codex-pets](https://github.com/YaKun9/codex-pets)。Qpets 在此基础上定义了面向独立桌面程序的运行时角色包、对话资源、安全导入和本地角色管理规则，因此不承诺与上游角色目录直接互换；具体差异见 [角色包文档](docs/pet-package-v1.md)。
+
+本仓库没有复制或分发 `codex-pets` 的网站代码和现成宠物素材。上游仓库级代码与文档采用 MIT License，宠物素材则遵循上游的素材总则和各角色目录自己的 `LICENSE.md`。完整说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 隐私与许可
 
 公开仓库不包含任何真人原始照片、生成过程目录或 QA 中间文件。代码使用 [MIT License](LICENSE)；角色美术不随 MIT 授权，参见 [ASSETS_LICENSE.md](ASSETS_LICENSE.md)。

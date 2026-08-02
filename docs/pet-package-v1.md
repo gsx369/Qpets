@@ -1,5 +1,11 @@
 # QPets 运行时角色包 v1
 
+## 设计来源与兼容边界
+
+本格式中的 `pet.json`、`spriteVersionNumber: 2` 和 `spritesheet.webp` 等基础约定参考了 [YaKun9/codex-pets](https://github.com/YaKun9/codex-pets)。Qpets 为独立桌面运行时增加了 `schemaVersion`、`renderType`、缩略图、对话资源、静态角色类型以及严格的文件与安全校验，所以上游 Codex 宠物目录不能视为可直接导入的 Qpets 角色包；导入前应按本文档重新封装并运行验证脚本。
+
+该参考不包含上游现成宠物素材。上游宠物素材不适用其仓库根目录 MIT License，使用时必须同时遵守上游的 [素材授权总则](https://github.com/YaKun9/codex-pets/blob/main/ASSETS_LICENSE.md) 和对应宠物目录中的 `LICENSE.md`。
+
 每个运行时角色包的根目录只能包含固定文件集合，禁止子目录、符号链接、源图、联系表、预览 GIF、验证报告和照片：
 
 - `sprite-atlas-v2`：`pet.json`、`dialogues.json`、`thumbnail.png`、`spritesheet.webp`
