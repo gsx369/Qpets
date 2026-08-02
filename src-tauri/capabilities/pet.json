@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pet-window",
+  "description": "The transparent pet window only uses the explicit Rust command surface.",
+  "windows": ["pet"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

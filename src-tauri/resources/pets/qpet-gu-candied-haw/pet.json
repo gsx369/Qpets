@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "qpet-gu-candied-haw",
+  "displayName": "俺滴老妹",
+  "description": "世界上最可爱的人",
+  "renderType": "sprite-atlas-v2",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
+  "thumbnailPath": "thumbnail.png",
+  "dialoguesPath": "dialogues.json"
+}

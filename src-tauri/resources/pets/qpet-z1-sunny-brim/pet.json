@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "qpet-z1-sunny-brim",
+  "displayName": "赵大美女",
+  "description": "大美女，大设计师，P图大师，复合型人才",
+  "renderType": "sprite-atlas-v2",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
+  "thumbnailPath": "thumbnail.png",
+  "dialoguesPath": "dialogues.json"
+}

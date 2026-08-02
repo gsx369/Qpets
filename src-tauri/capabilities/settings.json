@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "Settings can pick a user-selected file and open the project homepage.",
+  "windows": ["settings"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://github.com/gsx369/Qpets" }]
+    }
+  ]
+}
